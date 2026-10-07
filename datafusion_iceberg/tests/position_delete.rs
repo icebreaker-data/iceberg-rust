@@ -161,21 +161,78 @@ fn write_position_delete_file(
         .unwrap()
 }
 
-#[tokio::test]
-async fn applies_v2_position_deletes() {
-    let temp_dir = TempDir::new().unwrap();
-    let table_dir = format!("{}/test/orders", temp_dir.path().display());
+/// Creates `warehouse.test.orders` at `table_dir` in a fresh SQLite catalog,
+/// registered with a new session. Unpartitioned when `partition_spec` is `None`.
+async fn create_orders_table(
+    table_dir: &str,
+    schema: Schema,
+    partition_spec: Option<PartitionSpec>,
+    properties: &[(&str, &str)],
+) -> (Arc<dyn Catalog>, SessionContext) {
     let object_store = ObjectStoreBuilder::Filesystem(Arc::new(LocalFileSystem::new()));
     let catalog: Arc<dyn Catalog> = Arc::new(
         SqlCatalog::new("sqlite://", "warehouse", object_store)
             .await
             .unwrap(),
     );
-
     catalog
         .create_namespace(&Namespace::try_new(&["test".to_string()]).unwrap(), None)
         .await
         .unwrap();
+    let mut builder = Table::builder();
+    builder
+        .with_name("orders")
+        .with_location(table_dir)
+        .with_schema(schema);
+    if let Some(partition_spec) = partition_spec {
+        builder.with_partition_spec(partition_spec);
+    }
+    for (key, value) in properties {
+        builder.with_property((key.to_string(), value.to_string()));
+    }
+    builder
+        .build(&["test".to_owned()], catalog.clone())
+        .await
+        .unwrap();
+
+    let ctx = SessionContext::new();
+    ctx.register_catalog(
+        "warehouse",
+        Arc::new(IcebergCatalog::new(catalog.clone(), None).await.unwrap()),
+    );
+    (catalog, ctx)
+}
+
+/// Loads `warehouse.test.orders` and returns it with the path and partition
+/// of its (single) live data file.
+async fn load_orders_data_file(catalog: Arc<dyn Catalog>) -> (Table, String, Struct) {
+    let identifier = Identifier::new(&["test".to_string()], "orders");
+    let Tabular::Table(table) = catalog.load_tabular(&identifier).await.unwrap() else {
+        panic!("orders should be an Iceberg table");
+    };
+    let manifests = table.manifests(None, None).await.unwrap();
+    let data_files = table
+        .datafiles(&manifests, None, (None, None))
+        .await
+        .unwrap()
+        .try_collect::<Vec<_>>()
+        .await
+        .unwrap();
+    let (_, data_manifest_entry) = data_files
+        .iter()
+        .find(|(_, entry)| {
+            entry.status() != &Status::Deleted && entry.data_file().content() == &Content::Data
+        })
+        .unwrap();
+    let data_file_path = data_manifest_entry.data_file().file_path().clone();
+    let partition = data_manifest_entry.data_file().partition().clone();
+    (table, data_file_path, partition)
+}
+
+#[tokio::test]
+async fn applies_v2_position_deletes() {
+    let temp_dir = TempDir::new().unwrap();
+    let table_dir = format!("{}/test/orders", temp_dir.path().display());
 
     let schema = Schema::builder()
         .with_struct_field(StructField {
@@ -245,20 +302,7 @@ async fn applies_v2_position_deletes() {
         .build()
         .unwrap();
 
-    Table::builder()
-        .with_name("orders")
-        .with_location(&table_dir)
-        .with_schema(schema)
-        .with_partition_spec(partition_spec)
-        .build(&["test".to_owned()], catalog.clone())
-        .await
-        .unwrap();
-
-    let ctx = SessionContext::new();
-    ctx.register_catalog(
-        "warehouse",
-        Arc::new(IcebergCatalog::new(catalog.clone(), None).await.unwrap()),
-    );
+    let (catalog, ctx) = create_orders_table(&table_dir, schema, Some(partition_spec), &[]).await;
 
     run_query(
         "INSERT INTO warehouse.test.orders VALUES
@@ -272,26 +316,7 @@ async fn applies_v2_position_deletes() {
     )
     .await;
 
-    let identifier = Identifier::new(&["test".to_string()], "orders");
-    let Tabular::Table(mut table) = catalog.clone().load_tabular(&identifier).await.unwrap() else {
-        panic!("orders should be an Iceberg table");
-    };
-    let manifests = table.manifests(None, None).await.unwrap();
-    let data_files = table
-        .datafiles(&manifests, None, (None, None))
-        .await
-        .unwrap()
-        .try_collect::<Vec<_>>()
-        .await
-        .unwrap();
-    let (_, data_manifest_entry) = data_files
-        .iter()
-        .find(|(_, entry)| {
-            entry.status() != &Status::Deleted && entry.data_file().content() == &Content::Data
-        })
-        .unwrap();
-    let data_file_path = data_manifest_entry.data_file().file_path().clone();
-    let partition = data_manifest_entry.data_file().partition().clone();
+    let (mut table, data_file_path, partition) = load_orders_data_file(catalog).await;
 
     let delete_dir = format!("{table_dir}/data");
     std::fs::create_dir_all(&delete_dir).unwrap();
@@ -363,6 +388,15 @@ async fn applies_v2_position_deletes() {
             &table_dir,
         )
         .await
+    );
+
+    // Queries that project no columns count the surviving rows.
+    let batches = run_query("SELECT count(*) AS n FROM warehouse.test.orders", &ctx).await;
+    assert_batches_eq!(["+---+", "| n |", "+---+", "| 3 |", "+---+",], &batches);
+    let batches = run_query("SELECT 1 AS one FROM warehouse.test.orders LIMIT 1", &ctx).await;
+    assert_batches_eq!(
+        ["+-----+", "| one |", "+-----+", "| 1   |", "+-----+",],
+        &batches
     );
 
     let batches = run_query(
