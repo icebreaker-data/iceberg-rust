@@ -5,15 +5,19 @@ use std::time::Instant;
 use std::{fs::File, time::Duration};
 
 use datafusion::arrow::array::{
-    Array, Float64Array, Int32Array, RecordBatch, StringArray, StringViewArray,
+    Array, Float64Array, Int32Array, Int64Array, RecordBatch, StringArray, StringViewArray,
 };
 use datafusion::execution::context::SessionContext;
 use datafusion_iceberg::catalog::catalog::IcebergCatalog;
+use futures::TryStreamExt;
 use iceberg_rest_catalog::apis::configuration::Configuration;
 use iceberg_rest_catalog::catalog::RestCatalog;
+use iceberg_rust::catalog::identifier::Identifier;
 use iceberg_rust::catalog::namespace::Namespace;
+use iceberg_rust::catalog::tabular::Tabular;
 use iceberg_rust::catalog::Catalog;
 use iceberg_rust::object_store::ObjectStoreBuilder;
+use iceberg_rust::spec::manifest::{Content, FileFormat};
 use iceberg_rust::spec::partition::{PartitionField, PartitionSpec, Transform};
 use iceberg_rust::spec::schema::Schema;
 use iceberg_rust::spec::types::{PrimitiveType, StructField, Type};
@@ -76,6 +80,43 @@ async fn wait_for_worker(trino_container: &ContainerAsync<GenericImage>, timeout
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
     panic!("Trino still not queryable after {timeout:?}");
+}
+
+/// The single Int64 value a query returns.
+async fn query_i64(ctx: &SessionContext, sql: &str) -> i64 {
+    let batches = ctx.sql(sql).await.unwrap().collect().await.unwrap();
+    let batch = batches
+        .iter()
+        .find(|batch| batch.num_rows() > 0)
+        .unwrap_or_else(|| panic!("no rows from {sql}"));
+    batch
+        .column(0)
+        .as_any()
+        .downcast_ref::<Int64Array>()
+        .unwrap_or_else(|| panic!("{sql} returned {:?}", batch.schema()))
+        .value(0)
+}
+
+/// The formats of the live position-delete files of `test.<table>`.
+async fn position_delete_formats(catalog: Arc<dyn Catalog>, table: &str) -> Vec<FileFormat> {
+    let identifier = Identifier::new(&["test".to_string()], table);
+    let Tabular::Table(table) = catalog.load_tabular(&identifier).await.unwrap() else {
+        panic!("{identifier} should be an Iceberg table");
+    };
+    let manifests = table.manifests(None, None).await.unwrap();
+    let entries: Vec<_> = table
+        .datafiles(&manifests, None, (None, None))
+        .await
+        .unwrap()
+        .try_collect()
+        .await
+        .unwrap();
+    entries
+        .into_iter()
+        .map(|(_, entry)| entry.data_file().clone())
+        .filter(|data_file| *data_file.content() == Content::PositionDeletes)
+        .map(|data_file| data_file.file_format().clone())
+        .collect()
 }
 
 #[tokio::test]
@@ -244,7 +285,26 @@ async fn integration_trino_rest() {
         .await
         .unwrap();
 
-    assert_eq!(tables.len(), 9);
+    assert_eq!(tables.len(), 11);
+
+    // Trino deleted every third order from copies of `orders`: as position
+    // delete files in the v2 table and as deletion vectors in the v3 one.
+    let v2_formats = position_delete_formats(catalog.clone(), "orders_v2_deletes").await;
+    assert!(
+        !v2_formats.is_empty()
+            && v2_formats
+                .iter()
+                .all(|format| *format == FileFormat::Parquet),
+        "v2 deletes are Parquet position-delete files: {v2_formats:?}"
+    );
+    let v3_formats = position_delete_formats(catalog.clone(), "orders_v3_deletes").await;
+    assert!(
+        !v3_formats.is_empty()
+            && v3_formats
+                .iter()
+                .all(|format| *format == FileFormat::Puffin),
+        "v3 deletes are deletion vectors: {v3_formats:?}"
+    );
 
     let ctx = SessionContext::new();
 
@@ -315,6 +375,45 @@ async fn integration_trino_rest() {
         "iceberg",
         Arc::new(IcebergCatalog::new(catalog, None).await.unwrap()),
     );
+
+    // Reading the tables with deletes must match reading the delete-free
+    // `orders` with the deleted rows filtered out.
+    let surviving_count = query_i64(
+        &ctx,
+        "SELECT count(*) FROM iceberg.test.orders WHERE orderkey % 3 <> 0",
+    )
+    .await;
+    let surviving_key_sum = query_i64(
+        &ctx,
+        "SELECT sum(orderkey) FROM iceberg.test.orders WHERE orderkey % 3 <> 0",
+    )
+    .await;
+    assert!(surviving_count > 0);
+    for table in ["orders_v2_deletes", "orders_v3_deletes"] {
+        assert_eq!(
+            query_i64(&ctx, &format!("SELECT count(*) FROM iceberg.test.{table}")).await,
+            surviving_count,
+            "count(*) over {table}"
+        );
+        assert_eq!(
+            query_i64(
+                &ctx,
+                &format!("SELECT sum(orderkey) FROM iceberg.test.{table}")
+            )
+            .await,
+            surviving_key_sum,
+            "sum(orderkey) over {table}"
+        );
+        assert_eq!(
+            query_i64(
+                &ctx,
+                &format!("SELECT count(orderkey) FROM iceberg.test.{table} WHERE orderkey % 3 = 0")
+            )
+            .await,
+            0,
+            "deleted rows of {table}"
+        );
+    }
 
     let _ = ctx
         .sql(
