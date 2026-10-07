@@ -7,7 +7,7 @@
 //! - [`DataFile`] - Metadata about data files including statistics and metrics
 //! - [`Content`] - Types of content stored in data files (data vs deletes)
 //! - [`Status`] - Tracking additions and deletions of files
-//! - [`FileFormat`] - Supported file formats (Avro, ORC, Parquet)
+//! - [`FileFormat`] - Supported file formats (Avro, ORC, Parquet, Puffin)
 //!
 //! Manifest files are a key part of Iceberg's architecture, providing metadata about
 //! data files and enabling efficient file pruning during queries.
@@ -516,6 +516,8 @@ pub enum FileFormat {
     Orc = 1,
     /// Parquet file
     Parquet = 2,
+    /// Puffin file; holds the deletion vectors of format-version 3 tables
+    Puffin = 3,
 }
 
 /// Serialize for PrimitiveType wit special handling for
@@ -530,27 +532,28 @@ impl Serialize for FileFormat {
             Avro => serializer.serialize_str("AVRO"),
             Orc => serializer.serialize_str("ORC"),
             Parquet => serializer.serialize_str("PARQUET"),
+            Puffin => serializer.serialize_str("PUFFIN"),
         }
     }
 }
 
-/// Serialize for PrimitiveType wit special handling for
-/// Decimal and Fixed types.
+/// Names are matched case-insensitively, as Apache Iceberg Java does.
 impl<'de> Deserialize<'de> for FileFormat {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
-        if s == "AVRO" {
-            Ok(FileFormat::Avro)
-        } else if s == "ORC" {
-            Ok(FileFormat::Orc)
-        } else if s == "PARQUET" {
-            Ok(FileFormat::Parquet)
-        } else {
-            Err(serde::de::Error::custom("Invalid data file format."))
-        }
+        [
+            ("AVRO", FileFormat::Avro),
+            ("ORC", FileFormat::Orc),
+            ("PARQUET", FileFormat::Parquet),
+            ("PUFFIN", FileFormat::Puffin),
+        ]
+        .into_iter()
+        .find(|(name, _)| s.eq_ignore_ascii_case(name))
+        .map(|(_, format)| format)
+        .ok_or_else(|| serde::de::Error::custom(format!("Invalid data file format: {s}")))
     }
 }
 
@@ -2036,6 +2039,33 @@ mod tests {
 
     use super::*;
     use apache_avro::{self, types::Value as AvroValue};
+
+    #[test]
+    fn file_format_names_parse_case_insensitively() {
+        for (name, format) in [
+            ("\"PUFFIN\"", FileFormat::Puffin),
+            ("\"puffin\"", FileFormat::Puffin),
+            ("\"Parquet\"", FileFormat::Parquet),
+            ("\"avro\"", FileFormat::Avro),
+            ("\"ORC\"", FileFormat::Orc),
+        ] {
+            assert_eq!(
+                serde_json::from_str::<FileFormat>(name).unwrap(),
+                format,
+                "{name}"
+            );
+        }
+        assert_eq!(
+            serde_json::to_string(&FileFormat::Puffin).unwrap(),
+            "\"PUFFIN\""
+        );
+    }
+
+    #[test]
+    fn unknown_file_format_error_names_the_value() {
+        let error = serde_json::from_str::<FileFormat>("\"LANCE\"").unwrap_err();
+        assert!(error.to_string().contains("LANCE"), "{error}");
+    }
 
     #[test]
     fn numeric_bounds_decode_against_manifest_schema() {
