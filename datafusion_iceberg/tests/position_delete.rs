@@ -446,3 +446,56 @@ async fn applies_v2_position_deletes() {
         &batches
     );
 }
+
+/// Position deletes that reference no live data file — left behind when a
+/// rewrite replaces the data file they point at — delete nothing. Their rows
+/// must not be counted as table rows either, including by a `count(*)` that
+/// DataFusion answers from scan statistics.
+#[tokio::test]
+async fn dangling_position_deletes_change_no_counts() {
+    let temp_dir = TempDir::new().unwrap();
+    let table_dir = format!("{}/test/orders", temp_dir.path().display());
+    let schema = Schema::builder()
+        .with_struct_field(StructField {
+            id: 1,
+            name: "id".to_string(),
+            required: true,
+            field_type: Type::Primitive(PrimitiveType::Long),
+            doc: None,
+            initial_default: None,
+            write_default: None,
+        })
+        .build()
+        .unwrap();
+    let (catalog, ctx) = create_orders_table(&table_dir, schema, None, &[]).await;
+
+    run_query(
+        "INSERT INTO warehouse.test.orders VALUES (1), (2), (3), (4)",
+        &ctx,
+    )
+    .await;
+    let (mut table, _, partition) = load_orders_data_file(catalog).await;
+
+    let delete_dir = format!("{table_dir}/data");
+    std::fs::create_dir_all(&delete_dir).unwrap();
+    let dangling = write_position_delete_file(
+        &format!("{delete_dir}/position-delete-dangling.parquet"),
+        &format!("{delete_dir}/rewritten-away.parquet"),
+        partition,
+        &[0, 1, 2],
+    );
+    table
+        .new_transaction(None)
+        .append_delete(vec![dangling])
+        .commit()
+        .await
+        .unwrap();
+
+    let batches = run_query("SELECT count(*) AS n FROM warehouse.test.orders", &ctx).await;
+    assert_batches_eq!(["+---+", "| n |", "+---+", "| 4 |", "+---+",], &batches);
+    let batches = run_query("SELECT id FROM warehouse.test.orders ORDER BY id", &ctx).await;
+    assert_batches_eq!(
+        ["+----+", "| id |", "+----+", "| 1  |", "| 2  |", "| 3  |", "| 4  |", "+----+",],
+        &batches
+    );
+}

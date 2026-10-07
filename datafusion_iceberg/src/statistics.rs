@@ -7,19 +7,30 @@ use iceberg_rust::error::Error;
 use iceberg_rust::file_format::parquet::estimate_distinct_count;
 use iceberg_rust::spec::{
     decimal::{decimal_mantissa, decimal_scale},
-    manifest::{ManifestEntry, Status},
+    manifest::{Content, ManifestEntry, Status},
     schema::Schema,
     types::{PrimitiveType, Type},
     values::Value,
 };
 
+/// Table statistics summed over the live data files in `datafiles`.
+///
+/// Delete files' record counts are deleted rows, not table rows, so they are
+/// not summed. While any delete file is live, the statistics are only bounds:
+/// how many rows the deletes remove (possibly none) is known only once they
+/// are applied, so they are marked inexact.
 pub(crate) fn statistics_from_datafiles(
     schema: &Schema,
     datafiles: &[(String, ManifestEntry)],
 ) -> Statistics {
-    datafiles
-        .iter()
-        .filter(|(_, manifest)| !matches!(manifest.status(), Status::Deleted))
+    let live = || {
+        datafiles
+            .iter()
+            .filter(|(_, manifest)| !matches!(manifest.status(), Status::Deleted))
+    };
+    let has_deletes = live().any(|(_, manifest)| *manifest.data_file().content() != Content::Data);
+    let statistics = live()
+        .filter(|(_, manifest)| *manifest.data_file().content() == Content::Data)
         .map(|(_, manifest)| {
             let column_stats = column_statistics(schema, manifest);
             Statistics {
@@ -61,7 +72,12 @@ pub(crate) fn statistics_from_datafiles(
                 })
                 .collect(),
         })
-        .unwrap_or_default()
+        .unwrap_or_default();
+    if has_deletes {
+        statistics.to_inexact()
+    } else {
+        statistics
+    }
 }
 
 fn column_statistics<'a>(
@@ -214,7 +230,78 @@ fn new_distinct_count(acc: &ColumnStatistics, x: &ColumnStatistics) -> Precision
 #[cfg(test)]
 mod tests {
     use super::*;
-    use iceberg_rust::spec::decimal::decimal_from_i128_with_scale;
+    use iceberg_rust::spec::{
+        decimal::decimal_from_i128_with_scale,
+        manifest::{Content, DataFile, FileFormat},
+        table_metadata::FormatVersion,
+        types::StructField,
+        values::Struct,
+    };
+
+    fn entry(content: Content, record_count: i64) -> (String, ManifestEntry) {
+        let file_path = format!("/data/{content:?}.parquet");
+        let data_file = DataFile::builder()
+            .with_content(content)
+            .with_file_path(file_path)
+            .with_file_format(FileFormat::Parquet)
+            .with_partition(Struct {
+                fields: Vec::new(),
+                lookup: Default::default(),
+            })
+            .with_record_count(record_count)
+            .with_file_size_in_bytes(100)
+            .with_column_sizes(None)
+            .with_value_counts(None)
+            .with_null_value_counts(None)
+            .with_nan_value_counts(None)
+            .with_distinct_counts(None)
+            .with_lower_bounds(None)
+            .with_upper_bounds(None)
+            .build()
+            .unwrap();
+        let entry = ManifestEntry::builder()
+            .with_format_version(FormatVersion::V2)
+            .with_status(Status::Added)
+            .with_data_file(data_file)
+            .build()
+            .unwrap();
+        ("/manifest.avro".to_string(), entry)
+    }
+
+    fn id_schema() -> Schema {
+        Schema::builder()
+            .with_struct_field(StructField::new(
+                1,
+                "id",
+                true,
+                Type::Primitive(PrimitiveType::Long),
+                None,
+            ))
+            .build()
+            .unwrap()
+    }
+
+    #[test]
+    fn row_count_is_exact_without_delete_files() {
+        let statistics = statistics_from_datafiles(
+            &id_schema(),
+            &[entry(Content::Data, 4), entry(Content::Data, 2)],
+        );
+        assert_eq!(statistics.num_rows, Precision::Exact(6));
+    }
+
+    #[test]
+    fn row_count_excludes_delete_files_and_becomes_inexact() {
+        // Delete files' record counts are deleted rows, not table rows; and
+        // whether they delete anything is only known once they are applied.
+        for delete_content in [Content::PositionDeletes, Content::EqualityDeletes] {
+            let statistics = statistics_from_datafiles(
+                &id_schema(),
+                &[entry(Content::Data, 4), entry(delete_content, 3)],
+            );
+            assert_eq!(statistics.num_rows, Precision::Inexact(4));
+        }
+    }
 
     #[test]
     fn converts_precision_38_decimal_bound_to_datafusion() {
