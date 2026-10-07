@@ -123,10 +123,7 @@ mod tests {
         let data_file = DataFileBuilder::default()
             .with_content(Content::PositionDeletes)
             .with_file_path(puffin_path.to_string())
-            // The spec assigns format=PUFFIN to DV entries; this crate's
-            // FileFormat enum does not yet carry that variant, and our loader
-            // does not branch on it, so Parquet is a safe placeholder here.
-            .with_file_format(FileFormat::Parquet)
+            .with_file_format(FileFormat::Puffin)
             .with_partition(Struct {
                 fields: Vec::new(),
                 lookup: BTreeMap::new(),

@@ -106,7 +106,10 @@ pub async fn read(
                                 .build()?,
                         )
                     }
-                    _ => Err(Error::NotSupported("fileformat".to_string())),
+                    format => Err(Error::NotSupported(format!(
+                        "reading data file {} of format {format:?}",
+                        data_file.file_path()
+                    ))),
                 }
             }
         })
@@ -128,12 +131,11 @@ mod tests {
     };
     use object_store::memory::InMemory;
 
-    #[tokio::test]
-    async fn invalid_manifest_location_is_reported_instead_of_skipped() {
+    fn data_entry(path: &str, format: FileFormat) -> ManifestEntry {
         let data_file = DataFile::builder()
             .with_content(Content::Data)
-            .with_file_path("s3://bucket/data//broken.parquet".to_string())
-            .with_file_format(FileFormat::Parquet)
+            .with_file_path(path.to_string())
+            .with_file_format(format)
             .with_partition(Struct {
                 fields: vec![],
                 lookup: Default::default(),
@@ -149,16 +151,32 @@ mod tests {
             .with_upper_bounds(None)
             .build()
             .unwrap();
-        let entry = ManifestEntry::builder()
+        ManifestEntry::builder()
             .with_format_version(FormatVersion::V2)
             .with_status(Status::Added)
             .with_data_file(data_file)
             .build()
-            .unwrap();
+            .unwrap()
+    }
 
+    #[tokio::test]
+    async fn invalid_manifest_location_is_reported_instead_of_skipped() {
+        let entry = data_entry("s3://bucket/data//broken.parquet", FileFormat::Parquet);
         let stream = read(std::iter::once(entry), Arc::new(InMemory::new())).await;
         let items: Vec<_> = stream.collect().await;
         assert_eq!(items.len(), 1, "a bad file must not silently disappear");
         assert!(items[0].is_err());
+    }
+
+    #[tokio::test]
+    async fn unsupported_format_error_names_the_file_and_format() {
+        let entry = data_entry("s3://bucket/data/deletes.puffin", FileFormat::Puffin);
+        let stream = read(std::iter::once(entry), Arc::new(InMemory::new())).await;
+        let items: Vec<_> = stream.collect().await;
+        let error = items[0].as_ref().unwrap_err().to_string();
+        assert!(
+            error.contains("s3://bucket/data/deletes.puffin") && error.contains("Puffin"),
+            "{error}"
+        );
     }
 }
