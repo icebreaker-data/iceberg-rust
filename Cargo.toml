@@ -33,25 +33,25 @@ crc32fast = "1.4"
 #datafusion-functions-aggregate = "55"
 #datafusion-sql = "55"
 
-#Fork (andts/datafusion, rebased onto 55.1.0)
-#datafusion = { version = "55", features = ["backtrace", ], git = "https://github.com/andts/datafusion.git", rev = "fb722c227a3e5c22af3e140a418977c3df9c853d" }
-#datafusion-common = { version = "55", git = "https://github.com/andts/datafusion.git", rev = "fb722c227a3e5c22af3e140a418977c3df9c853d" }
-#datafusion-execution = { version = "55", git = "https://github.com/andts/datafusion.git", rev = "fb722c227a3e5c22af3e140a418977c3df9c853d" }
-#datafusion-expr = { version = "55", git = "https://github.com/andts/datafusion.git", rev = "fb722c227a3e5c22af3e140a418977c3df9c853d" }
-#datafusion-functions = { version = "55", features = ["crypto_expressions"], git = "https://github.com/andts/datafusion.git", rev = "fb722c227a3e5c22af3e140a418977c3df9c853d" }
-#datafusion-functions-aggregate = { version = "55", git = "https://github.com/andts/datafusion.git", rev = "fb722c227a3e5c22af3e140a418977c3df9c853d" }
-#datafusion-proto = { version = "55", git = "https://github.com/andts/datafusion.git", rev = "fb722c227a3e5c22af3e140a418977c3df9c853d" }
-#datafusion-sql = { version = "55", git = "https://github.com/andts/datafusion.git", rev = "fb722c227a3e5c22af3e140a418977c3df9c853d" }
+#Fork (icebreaker-data/datafusion main, rebased onto 55.1.0)
+datafusion = { version = "55", features = ["backtrace", ], git = "https://github.com/icebreaker-data/datafusion.git", rev = "0b5a678b86e915d6d977a89110a7ce2e0205e18c" }
+datafusion-common = { version = "55", git = "https://github.com/icebreaker-data/datafusion.git", rev = "0b5a678b86e915d6d977a89110a7ce2e0205e18c" }
+datafusion-execution = { version = "55", git = "https://github.com/icebreaker-data/datafusion.git", rev = "0b5a678b86e915d6d977a89110a7ce2e0205e18c" }
+datafusion-expr = { version = "55", git = "https://github.com/icebreaker-data/datafusion.git", rev = "0b5a678b86e915d6d977a89110a7ce2e0205e18c" }
+datafusion-functions = { version = "55", features = ["crypto_expressions"], git = "https://github.com/icebreaker-data/datafusion.git", rev = "0b5a678b86e915d6d977a89110a7ce2e0205e18c" }
+datafusion-functions-aggregate = { version = "55", git = "https://github.com/icebreaker-data/datafusion.git", rev = "0b5a678b86e915d6d977a89110a7ce2e0205e18c" }
+datafusion-proto = { version = "55", git = "https://github.com/icebreaker-data/datafusion.git", rev = "0b5a678b86e915d6d977a89110a7ce2e0205e18c" }
+datafusion-sql = { version = "55", git = "https://github.com/icebreaker-data/datafusion.git", rev = "0b5a678b86e915d6d977a89110a7ce2e0205e18c" }
 
 #Local Changes (for local development against the datafusion-andts checkout)
-datafusion = { version = "55", features = ["backtrace", ], path = "../../datafusion-andts/datafusion/core" }
-datafusion-common = { version = "55", path = "../../datafusion-andts/datafusion/common"  }
-datafusion-execution = { version = "55", path = "../../datafusion-andts/datafusion/execution" }
-datafusion-expr = { version = "55", path = "../../datafusion-andts/datafusion/expr" }
-datafusion-functions = { version = "55", features = ["crypto_expressions"], path = "../../datafusion-andts/datafusion/functions" }
-datafusion-functions-aggregate = { version = "55", path = "../../datafusion-andts/datafusion/functions-aggregate" }
-datafusion-proto = { version = "55", path = "../../datafusion-andts/datafusion/proto" }
-datafusion-sql = { version = "55", path = "../../datafusion-andts/datafusion/sql" }
+#datafusion = { version = "55", features = ["backtrace", ], path = "../../datafusion-andts/datafusion/core" }
+#datafusion-common = { version = "55", path = "../../datafusion-andts/datafusion/common"  }
+#datafusion-execution = { version = "55", path = "../../datafusion-andts/datafusion/execution" }
+#datafusion-expr = { version = "55", path = "../../datafusion-andts/datafusion/expr" }
+#datafusion-functions = { version = "55", features = ["crypto_expressions"], path = "../../datafusion-andts/datafusion/functions" }
+#datafusion-functions-aggregate = { version = "55", path = "../../datafusion-andts/datafusion/functions-aggregate" }
+#datafusion-proto = { version = "55", path = "../../datafusion-andts/datafusion/proto" }
+#datafusion-sql = { version = "55", path = "../../datafusion-andts/datafusion/sql" }
 derive-getters = "0.5.0"
 derive_builder = "0.20"
 futures = "0.3.31"

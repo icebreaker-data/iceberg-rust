@@ -1944,6 +1944,7 @@ dependencies = [
 [[package]]
 name = "datafusion"
 version = "55.1.0"
+source = "git+https://github.com/icebreaker-data/datafusion.git?rev=0b5a678b86e915d6d977a89110a7ce2e0205e18c#0b5a678b86e915d6d977a89110a7ce2e0205e18c"
 dependencies = [
  "arrow 59.3.0",
  "arrow-schema 59.3.0",
@@ -1995,6 +1996,7 @@ dependencies = [
 [[package]]
 name = "datafusion-catalog"
 version = "55.1.0"
+source = "git+https://github.com/icebreaker-data/datafusion.git?rev=0b5a678b86e915d6d977a89110a7ce2e0205e18c#0b5a678b86e915d6d977a89110a7ce2e0205e18c"
 dependencies = [
  "arrow 59.3.0",
  "async-trait",
@@ -2018,6 +2020,7 @@ dependencies = [
 [[package]]
 name = "datafusion-catalog-listing"
 version = "55.1.0"
+source = "git+https://github.com/icebreaker-data/datafusion.git?rev=0b5a678b86e915d6d977a89110a7ce2e0205e18c#0b5a678b86e915d6d977a89110a7ce2e0205e18c"
 dependencies = [
  "arrow 59.3.0",
  "async-trait",
@@ -2040,6 +2043,7 @@ dependencies = [
 [[package]]
 name = "datafusion-common"
 version = "55.1.0"
+source = "git+https://github.com/icebreaker-data/datafusion.git?rev=0b5a678b86e915d6d977a89110a7ce2e0205e18c#0b5a678b86e915d6d977a89110a7ce2e0205e18c"
 dependencies = [
  "arrow 59.3.0",
  "arrow-ipc 59.3.0",
@@ -2065,6 +2069,7 @@ dependencies = [
 [[package]]
 name = "datafusion-common-runtime"
 version = "55.1.0"
+source = "git+https://github.com/icebreaker-data/datafusion.git?rev=0b5a678b86e915d6d977a89110a7ce2e0205e18c#0b5a678b86e915d6d977a89110a7ce2e0205e18c"
 dependencies = [
  "futures",
  "log",
@@ -2074,6 +2079,7 @@ dependencies = [
 [[package]]
 name = "datafusion-datasource"
 version = "55.1.0"
+source = "git+https://github.com/icebreaker-data/datafusion.git?rev=0b5a678b86e915d6d977a89110a7ce2e0205e18c#0b5a678b86e915d6d977a89110a7ce2e0205e18c"
 dependencies = [
  "arrow 59.3.0",
  "async-compression",
@@ -2109,6 +2115,7 @@ dependencies = [
 [[package]]
 name = "datafusion-datasource-arrow"
 version = "55.1.0"
+source = "git+https://github.com/icebreaker-data/datafusion.git?rev=0b5a678b86e915d6d977a89110a7ce2e0205e18c#0b5a678b86e915d6d977a89110a7ce2e0205e18c"
 dependencies = [
  "arrow 59.3.0",
  "arrow-ipc 59.3.0",
@@ -2132,6 +2139,7 @@ dependencies = [
 [[package]]
 name = "datafusion-datasource-csv"
 version = "55.1.0"
+source = "git+https://github.com/icebreaker-data/datafusion.git?rev=0b5a678b86e915d6d977a89110a7ce2e0205e18c#0b5a678b86e915d6d977a89110a7ce2e0205e18c"
 dependencies = [
  "arrow 59.3.0",
  "async-trait",
@@ -2154,6 +2162,7 @@ dependencies = [
 [[package]]
 name = "datafusion-datasource-json"
 version = "55.1.0"
+source = "git+https://github.com/icebreaker-data/datafusion.git?rev=0b5a678b86e915d6d977a89110a7ce2e0205e18c#0b5a678b86e915d6d977a89110a7ce2e0205e18c"
 dependencies = [
  "arrow 59.3.0",
  "async-trait",
@@ -2176,6 +2185,7 @@ dependencies = [
 [[package]]
 name = "datafusion-datasource-parquet"
 version = "55.1.0"
+source = "git+https://github.com/icebreaker-data/datafusion.git?rev=0b5a678b86e915d6d977a89110a7ce2e0205e18c#0b5a678b86e915d6d977a89110a7ce2e0205e18c"
 dependencies = [
  "arrow 59.3.0",
  "arrow-schema 59.3.0",
@@ -2207,10 +2217,12 @@ dependencies = [
 [[package]]
 name = "datafusion-doc"
 version = "55.1.0"
+source = "git+https://github.com/icebreaker-data/datafusion.git?rev=0b5a678b86e915d6d977a89110a7ce2e0205e18c#0b5a678b86e915d6d977a89110a7ce2e0205e18c"
 
 [[package]]
 name = "datafusion-execution"
 version = "55.1.0"
+source = "git+https://github.com/icebreaker-data/datafusion.git?rev=0b5a678b86e915d6d977a89110a7ce2e0205e18c#0b5a678b86e915d6d977a89110a7ce2e0205e18c"
 dependencies = [
  "arrow 59.3.0",
  "arrow-buffer 59.3.0",
@@ -2235,6 +2247,7 @@ dependencies = [
 [[package]]
 name = "datafusion-expr"
 version = "55.1.0"
+source = "git+https://github.com/icebreaker-data/datafusion.git?rev=0b5a678b86e915d6d977a89110a7ce2e0205e18c#0b5a678b86e915d6d977a89110a7ce2e0205e18c"
 dependencies = [
  "arrow 59.3.0",
  "arrow-schema 59.3.0",
@@ -2258,6 +2271,7 @@ dependencies = [
 [[package]]
 name = "datafusion-expr-common"
 version = "55.1.0"
+source = "git+https://github.com/icebreaker-data/datafusion.git?rev=0b5a678b86e915d6d977a89110a7ce2e0205e18c#0b5a678b86e915d6d977a89110a7ce2e0205e18c"
 dependencies = [
  "arrow 59.3.0",
  "datafusion-common",
@@ -2268,6 +2282,7 @@ dependencies = [
 [[package]]
 name = "datafusion-functions"
 version = "55.1.0"
+source = "git+https://github.com/icebreaker-data/datafusion.git?rev=0b5a678b86e915d6d977a89110a7ce2e0205e18c#0b5a678b86e915d6d977a89110a7ce2e0205e18c"
 dependencies = [
  "arrow 59.3.0",
  "arrow-buffer 59.3.0",
@@ -2298,6 +2313,7 @@ dependencies = [
 [[package]]
 name = "datafusion-functions-aggregate"
 version = "55.1.0"
+source = "git+https://github.com/icebreaker-data/datafusion.git?rev=0b5a678b86e915d6d977a89110a7ce2e0205e18c#0b5a678b86e915d6d977a89110a7ce2e0205e18c"
 dependencies = [
  "arrow 59.3.0",
  "datafusion-common",
@@ -2317,6 +2333,7 @@ dependencies = [
 [[package]]
 name = "datafusion-functions-aggregate-common"
 version = "55.1.0"
+source = "git+https://github.com/icebreaker-data/datafusion.git?rev=0b5a678b86e915d6d977a89110a7ce2e0205e18c#0b5a678b86e915d6d977a89110a7ce2e0205e18c"
 dependencies = [
  "arrow 59.3.0",
  "datafusion-common",
@@ -2327,6 +2344,7 @@ dependencies = [
 [[package]]
 name = "datafusion-functions-nested"
 version = "55.1.0"
+source = "git+https://github.com/icebreaker-data/datafusion.git?rev=0b5a678b86e915d6d977a89110a7ce2e0205e18c#0b5a678b86e915d6d977a89110a7ce2e0205e18c"
 dependencies = [
  "arrow 59.3.0",
  "arrow-ord 59.3.0",
@@ -2350,6 +2368,7 @@ dependencies = [
 [[package]]
 name = "datafusion-functions-table"
 version = "55.1.0"
+source = "git+https://github.com/icebreaker-data/datafusion.git?rev=0b5a678b86e915d6d977a89110a7ce2e0205e18c#0b5a678b86e915d6d977a89110a7ce2e0205e18c"
 dependencies = [
  "arrow 59.3.0",
  "async-trait",
@@ -2364,6 +2383,7 @@ dependencies = [
 [[package]]
 name = "datafusion-functions-window"
 version = "55.1.0"
+source = "git+https://github.com/icebreaker-data/datafusion.git?rev=0b5a678b86e915d6d977a89110a7ce2e0205e18c#0b5a678b86e915d6d977a89110a7ce2e0205e18c"
 dependencies = [
  "arrow 59.3.0",
  "datafusion-common",
@@ -2379,6 +2399,7 @@ dependencies = [
 [[package]]
 name = "datafusion-functions-window-common"
 version = "55.1.0"
+source = "git+https://github.com/icebreaker-data/datafusion.git?rev=0b5a678b86e915d6d977a89110a7ce2e0205e18c#0b5a678b86e915d6d977a89110a7ce2e0205e18c"
 dependencies = [
  "datafusion-common",
  "datafusion-physical-expr-common",
@@ -2401,6 +2422,7 @@ dependencies = [
 [[package]]
 name = "datafusion-macros"
 version = "55.1.0"
+source = "git+https://github.com/icebreaker-data/datafusion.git?rev=0b5a678b86e915d6d977a89110a7ce2e0205e18c#0b5a678b86e915d6d977a89110a7ce2e0205e18c"
 dependencies = [
  "datafusion-doc",
  "quote",
@@ -2410,6 +2432,7 @@ dependencies = [
 [[package]]
 name = "datafusion-optimizer"
 version = "55.1.0"
+source = "git+https://github.com/icebreaker-data/datafusion.git?rev=0b5a678b86e915d6d977a89110a7ce2e0205e18c#0b5a678b86e915d6d977a89110a7ce2e0205e18c"
 dependencies = [
  "arrow 59.3.0",
  "chrono",
@@ -2428,6 +2451,7 @@ dependencies = [
 [[package]]
 name = "datafusion-physical-expr"
 version = "55.1.0"
+source = "git+https://github.com/icebreaker-data/datafusion.git?rev=0b5a678b86e915d6d977a89110a7ce2e0205e18c#0b5a678b86e915d6d977a89110a7ce2e0205e18c"
 dependencies = [
  "arrow 59.3.0",
  "arrow-schema 59.3.0",
@@ -2450,6 +2474,7 @@ dependencies = [
 [[package]]
 name = "datafusion-physical-expr-adapter"
 version = "55.1.0"
+source = "git+https://github.com/icebreaker-data/datafusion.git?rev=0b5a678b86e915d6d977a89110a7ce2e0205e18c#0b5a678b86e915d6d977a89110a7ce2e0205e18c"
 dependencies = [
  "arrow 59.3.0",
  "datafusion-common",
@@ -2463,6 +2488,7 @@ dependencies = [
 [[package]]
 name = "datafusion-physical-expr-common"
 version = "55.1.0"
+source = "git+https://github.com/icebreaker-data/datafusion.git?rev=0b5a678b86e915d6d977a89110a7ce2e0205e18c#0b5a678b86e915d6d977a89110a7ce2e0205e18c"
 dependencies = [
  "arrow 59.3.0",
  "chrono",
@@ -2479,6 +2505,7 @@ dependencies = [
 [[package]]
 name = "datafusion-physical-optimizer"
 version = "55.1.0"
+source = "git+https://github.com/icebreaker-data/datafusion.git?rev=0b5a678b86e915d6d977a89110a7ce2e0205e18c#0b5a678b86e915d6d977a89110a7ce2e0205e18c"
 dependencies = [
  "arrow 59.3.0",
  "datafusion-common",
@@ -2497,6 +2524,7 @@ dependencies = [
 [[package]]
 name = "datafusion-physical-plan"
 version = "55.1.0"
+source = "git+https://github.com/icebreaker-data/datafusion.git?rev=0b5a678b86e915d6d977a89110a7ce2e0205e18c#0b5a678b86e915d6d977a89110a7ce2e0205e18c"
 dependencies = [
  "arrow 59.3.0",
  "arrow-data 59.3.0",
@@ -2533,6 +2561,7 @@ dependencies = [
 [[package]]
 name = "datafusion-proto"
 version = "55.1.0"
+source = "git+https://github.com/icebreaker-data/datafusion.git?rev=0b5a678b86e915d6d977a89110a7ce2e0205e18c#0b5a678b86e915d6d977a89110a7ce2e0205e18c"
 dependencies = [
  "arrow 59.3.0",
  "datafusion-catalog",
@@ -2559,6 +2588,7 @@ dependencies = [
 [[package]]
 name = "datafusion-proto-common"
 version = "55.1.0"
+source = "git+https://github.com/icebreaker-data/datafusion.git?rev=0b5a678b86e915d6d977a89110a7ce2e0205e18c#0b5a678b86e915d6d977a89110a7ce2e0205e18c"
 dependencies = [
  "arrow 59.3.0",
  "datafusion-common",
@@ -2568,6 +2598,7 @@ dependencies = [
 [[package]]
 name = "datafusion-proto-models"
 version = "55.1.0"
+source = "git+https://github.com/icebreaker-data/datafusion.git?rev=0b5a678b86e915d6d977a89110a7ce2e0205e18c#0b5a678b86e915d6d977a89110a7ce2e0205e18c"
 dependencies = [
  "datafusion-common",
  "datafusion-proto-common",
@@ -2577,6 +2608,7 @@ dependencies = [
 [[package]]
 name = "datafusion-pruning"
 version = "55.1.0"
+source = "git+https://github.com/icebreaker-data/datafusion.git?rev=0b5a678b86e915d6d977a89110a7ce2e0205e18c#0b5a678b86e915d6d977a89110a7ce2e0205e18c"
 dependencies = [
  "arrow 59.3.0",
  "datafusion-common",
@@ -2591,6 +2623,7 @@ dependencies = [
 [[package]]
 name = "datafusion-session"
 version = "55.1.0"
+source = "git+https://github.com/icebreaker-data/datafusion.git?rev=0b5a678b86e915d6d977a89110a7ce2e0205e18c#0b5a678b86e915d6d977a89110a7ce2e0205e18c"
 dependencies = [
  "arrow-schema 59.3.0",
  "async-trait",
@@ -2604,6 +2637,7 @@ dependencies = [
 [[package]]
 name = "datafusion-sql"
 version = "55.1.0"
+source = "git+https://github.com/icebreaker-data/datafusion.git?rev=0b5a678b86e915d6d977a89110a7ce2e0205e18c#0b5a678b86e915d6d977a89110a7ce2e0205e18c"
 dependencies = [
  "arrow 59.3.0",
  "bigdecimal",
