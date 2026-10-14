@@ -29,7 +29,10 @@ use std::{
 
 use datafusion::{
     arrow::{
-        array::{Array, BooleanArray, BooleanBufferBuilder, Int64Array, RecordBatch, StringArray},
+        array::{
+            Array, BooleanArray, BooleanBufferBuilder, Int64Array, RecordBatch, RecordBatchOptions,
+            StringArray,
+        },
         compute::{filter_record_batch, kernels::cmp::eq},
         datatypes::{Schema as ArrowSchema, SchemaRef},
     },
@@ -368,18 +371,19 @@ impl DvFilterStream {
     }
 
     fn finalize(&self, batch: RecordBatch) -> Result<RecordBatch, DataFusionError> {
-        // The row-number column is always internal, so there is always at least
-        // one column to strip.
         let keep_cols: Vec<usize> = (0..batch.num_columns())
             .filter(|i| !self.strip_indices.contains(i))
             .collect();
         // `RecordBatch::project` rebuilds the schema; replace it with our
         // pre-computed `output_schema` so consumers see the canonical fields
-        // (preserving any metadata we set up in `try_new`).
+        // (preserving any metadata we set up in `try_new`). The row count is
+        // passed explicitly: a query projecting no user columns (`count(*)`)
+        // leaves no columns to infer it from.
         let projected = batch.project(&keep_cols)?;
-        Ok(RecordBatch::try_new(
+        Ok(RecordBatch::try_new_with_options(
             self.output_schema.clone(),
             projected.columns().to_vec(),
+            &RecordBatchOptions::new().with_row_count(Some(projected.num_rows())),
         )?)
     }
 }
@@ -680,5 +684,33 @@ mod tests {
         let schema = out[0].schema();
         let names: Vec<&str> = schema.fields().iter().map(|f| f.name().as_str()).collect();
         assert_eq!(names, vec!["v", PATH_COL]);
+    }
+
+    #[tokio::test]
+    async fn stream_empty_user_projection_keeps_surviving_row_count() {
+        // `count(*)` projects no user columns: the child emits only the two
+        // internal columns, so the output has zero columns and must carry the
+        // number of surviving rows explicitly.
+        let schema = Arc::new(Schema::new(vec![
+            Field::new(PATH_COL, DataType::Utf8, false),
+            Field::new(ROW_NUMBER_COL, DataType::Int64, false),
+        ]));
+        let batch = RecordBatch::try_new(
+            schema,
+            vec![
+                Arc::new(StringArray::from(vec!["/data/a.parquet"; 5])),
+                Arc::new(Int64Array::from(vec![0, 1, 2, 3, 4])),
+            ],
+        )
+        .unwrap();
+        let mut dvs = HashMap::new();
+        dvs.insert("/data/a.parquet".to_string(), dv_with(&[1, 3]));
+        let input = MockBatches::new(vec![batch]);
+        let exec = Arc::new(
+            IcebergDvExec::try_new(input, Arc::new(dvs), PATH_COL, ROW_NUMBER_COL, true).unwrap(),
+        );
+        let out = run(exec).await;
+        assert_eq!(out[0].num_columns(), 0);
+        assert_eq!(out[0].num_rows(), 3);
     }
 }

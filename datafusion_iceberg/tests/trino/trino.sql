@@ -8,3 +8,7 @@ create table iceberg.test.partsupp as select * from tpch.tiny.partsupp;
 create table iceberg.test.region as select * from tpch.tiny.region;
 create table iceberg.test.supplier as select * from tpch.tiny.supplier;
 create table iceberg.test.whitespace_cols as select 1 as id, 42 as "my col", 'a' as "grp col";
+create table iceberg.test.orders_v2_deletes with ( format_version = 2 ) as select * from tpch.tiny.orders;
+delete from iceberg.test.orders_v2_deletes where orderkey % 3 = 0;
+create table iceberg.test.orders_v3_deletes with ( format_version = 3 ) as select * from tpch.tiny.orders;
+delete from iceberg.test.orders_v3_deletes where orderkey % 3 = 0;

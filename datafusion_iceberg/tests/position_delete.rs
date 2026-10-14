@@ -19,9 +19,11 @@ use iceberg_rust::{
     catalog::{identifier::Identifier, tabular::Tabular, Catalog},
     object_store::ObjectStoreBuilder,
     spec::{
+        deletion_vector::DeletionVector,
         manifest::{Content, DataFile, FileFormat, Status},
         namespace::Namespace,
         partition::{PartitionField, PartitionSpec, Transform},
+        puffin::{Blob, FileMetadata, PuffinWriter, STANDARD_BLOB_TYPE_DELETION_VECTOR_V1},
         schema::Schema,
         types::{PrimitiveType, StructField, Type},
         values::Struct,
@@ -30,6 +32,7 @@ use iceberg_rust::{
 };
 use iceberg_sql_catalog::SqlCatalog;
 use object_store::local::LocalFileSystem;
+use roaring::RoaringTreemap;
 use tempfile::TempDir;
 
 #[cfg(feature = "proto")]
@@ -161,21 +164,141 @@ fn write_position_delete_file(
         .unwrap()
 }
 
-#[tokio::test]
-async fn applies_v2_position_deletes() {
-    let temp_dir = TempDir::new().unwrap();
-    let table_dir = format!("{}/test/orders", temp_dir.path().display());
+/// Creates `warehouse.test.orders` at `table_dir` in a fresh SQLite catalog,
+/// registered with a new session. Unpartitioned when `partition_spec` is `None`.
+async fn create_orders_table(
+    table_dir: &str,
+    schema: Schema,
+    partition_spec: Option<PartitionSpec>,
+    properties: &[(&str, &str)],
+) -> (Arc<dyn Catalog>, SessionContext) {
     let object_store = ObjectStoreBuilder::Filesystem(Arc::new(LocalFileSystem::new()));
     let catalog: Arc<dyn Catalog> = Arc::new(
         SqlCatalog::new("sqlite://", "warehouse", object_store)
             .await
             .unwrap(),
     );
-
     catalog
         .create_namespace(&Namespace::try_new(&["test".to_string()]).unwrap(), None)
         .await
         .unwrap();
+    let mut builder = Table::builder();
+    builder
+        .with_name("orders")
+        .with_location(table_dir)
+        .with_schema(schema);
+    if let Some(partition_spec) = partition_spec {
+        builder.with_partition_spec(partition_spec);
+    }
+    for (key, value) in properties {
+        builder.with_property((key.to_string(), value.to_string()));
+    }
+    builder
+        .build(&["test".to_owned()], catalog.clone())
+        .await
+        .unwrap();
+
+    let ctx = SessionContext::new();
+    ctx.register_catalog(
+        "warehouse",
+        Arc::new(IcebergCatalog::new(catalog.clone(), None).await.unwrap()),
+    );
+    (catalog, ctx)
+}
+
+/// Loads `warehouse.test.orders` and returns it with the path and partition
+/// of its (single) live data file.
+async fn load_orders_data_file(catalog: Arc<dyn Catalog>) -> (Table, String, Struct) {
+    let identifier = Identifier::new(&["test".to_string()], "orders");
+    let Tabular::Table(table) = catalog.load_tabular(&identifier).await.unwrap() else {
+        panic!("orders should be an Iceberg table");
+    };
+    let manifests = table.manifests(None, None).await.unwrap();
+    let data_files = table
+        .datafiles(&manifests, None, (None, None))
+        .await
+        .unwrap()
+        .try_collect::<Vec<_>>()
+        .await
+        .unwrap();
+    let (_, data_manifest_entry) = data_files
+        .iter()
+        .find(|(_, entry)| {
+            entry.status() != &Status::Deleted && entry.data_file().content() == &Content::Data
+        })
+        .unwrap();
+    let data_file_path = data_manifest_entry.data_file().file_path().clone();
+    let partition = data_manifest_entry.data_file().partition().clone();
+    (table, data_file_path, partition)
+}
+
+/// Writes a Puffin file holding one deletion vector over `positions` of
+/// `data_file_path`, and returns its manifest entry as the spec (and
+/// iceberg-java writers) record it: format PUFFIN, with the blob's byte range.
+fn write_deletion_vector_file(
+    path: &str,
+    data_file_path: &str,
+    partition: Struct,
+    positions: &[u64],
+) -> DataFile {
+    let vector = DeletionVector::from(positions.iter().copied().collect::<RoaringTreemap>());
+    let payload = vector.to_bytes().unwrap();
+    let mut writer = PuffinWriter::new();
+    writer
+        .write_blob(Blob {
+            blob_type: STANDARD_BLOB_TYPE_DELETION_VECTOR_V1.to_string(),
+            fields: vec![],
+            snapshot_id: -1,
+            sequence_number: -1,
+            compression_codec: None,
+            properties: Default::default(),
+            payload: &payload,
+        })
+        .unwrap();
+    let bytes = writer.finish().unwrap();
+    std::fs::write(path, &bytes).unwrap();
+    let blob = &FileMetadata::read_footer(&bytes).unwrap().blobs[0];
+
+    DataFile::builder()
+        .with_content(Content::PositionDeletes)
+        .with_file_path(path.to_string())
+        .with_file_format(FileFormat::Puffin)
+        .with_partition(partition)
+        .with_record_count(i64::try_from(positions.len()).unwrap())
+        .with_file_size_in_bytes(i64::try_from(bytes.len()).unwrap())
+        .with_column_sizes(None)
+        .with_value_counts(None)
+        .with_null_value_counts(None)
+        .with_nan_value_counts(None)
+        .with_distinct_counts(None)
+        .with_lower_bounds(None)
+        .with_upper_bounds(None)
+        .with_referenced_data_file(Some(data_file_path.to_string()))
+        .with_content_offset(Some(blob.offset))
+        .with_content_size_in_bytes(Some(blob.length))
+        .build()
+        .unwrap()
+}
+
+fn id_schema() -> Schema {
+    Schema::builder()
+        .with_struct_field(StructField {
+            id: 1,
+            name: "id".to_string(),
+            required: true,
+            field_type: Type::Primitive(PrimitiveType::Long),
+            doc: None,
+            initial_default: None,
+            write_default: None,
+        })
+        .build()
+        .unwrap()
+}
+
+#[tokio::test]
+async fn applies_v2_position_deletes() {
+    let temp_dir = TempDir::new().unwrap();
+    let table_dir = format!("{}/test/orders", temp_dir.path().display());
 
     let schema = Schema::builder()
         .with_struct_field(StructField {
@@ -245,20 +368,7 @@ async fn applies_v2_position_deletes() {
         .build()
         .unwrap();
 
-    Table::builder()
-        .with_name("orders")
-        .with_location(&table_dir)
-        .with_schema(schema)
-        .with_partition_spec(partition_spec)
-        .build(&["test".to_owned()], catalog.clone())
-        .await
-        .unwrap();
-
-    let ctx = SessionContext::new();
-    ctx.register_catalog(
-        "warehouse",
-        Arc::new(IcebergCatalog::new(catalog.clone(), None).await.unwrap()),
-    );
+    let (catalog, ctx) = create_orders_table(&table_dir, schema, Some(partition_spec), &[]).await;
 
     run_query(
         "INSERT INTO warehouse.test.orders VALUES
@@ -272,26 +382,7 @@ async fn applies_v2_position_deletes() {
     )
     .await;
 
-    let identifier = Identifier::new(&["test".to_string()], "orders");
-    let Tabular::Table(mut table) = catalog.clone().load_tabular(&identifier).await.unwrap() else {
-        panic!("orders should be an Iceberg table");
-    };
-    let manifests = table.manifests(None, None).await.unwrap();
-    let data_files = table
-        .datafiles(&manifests, None, (None, None))
-        .await
-        .unwrap()
-        .try_collect::<Vec<_>>()
-        .await
-        .unwrap();
-    let (_, data_manifest_entry) = data_files
-        .iter()
-        .find(|(_, entry)| {
-            entry.status() != &Status::Deleted && entry.data_file().content() == &Content::Data
-        })
-        .unwrap();
-    let data_file_path = data_manifest_entry.data_file().file_path().clone();
-    let partition = data_manifest_entry.data_file().partition().clone();
+    let (mut table, data_file_path, partition) = load_orders_data_file(catalog).await;
 
     let delete_dir = format!("{table_dir}/data");
     std::fs::create_dir_all(&delete_dir).unwrap();
@@ -365,6 +456,15 @@ async fn applies_v2_position_deletes() {
         .await
     );
 
+    // Queries that project no columns count the surviving rows.
+    let batches = run_query("SELECT count(*) AS n FROM warehouse.test.orders", &ctx).await;
+    assert_batches_eq!(["+---+", "| n |", "+---+", "| 3 |", "+---+",], &batches);
+    let batches = run_query("SELECT 1 AS one FROM warehouse.test.orders LIMIT 1", &ctx).await;
+    assert_batches_eq!(
+        ["+-----+", "| one |", "+-----+", "| 1   |", "+-----+",],
+        &batches
+    );
+
     let batches = run_query(
         "SELECT __iceberg_data_sequence_number, id, __data_file_path,
                 __iceberg_file_row_position
@@ -411,4 +511,86 @@ async fn applies_v2_position_deletes() {
         ["+----+", "| id |", "+----+", "| 7  |", "| 8  |", "+----+",],
         &batches
     );
+}
+
+/// Position deletes that reference no live data file — left behind when a
+/// rewrite replaces the data file they point at — delete nothing. Their rows
+/// must not be counted as table rows either, including by a `count(*)` that
+/// DataFusion answers from scan statistics.
+#[tokio::test]
+async fn dangling_position_deletes_change_no_counts() {
+    let temp_dir = TempDir::new().unwrap();
+    let table_dir = format!("{}/test/orders", temp_dir.path().display());
+    let (catalog, ctx) = create_orders_table(&table_dir, id_schema(), None, &[]).await;
+
+    run_query(
+        "INSERT INTO warehouse.test.orders VALUES (1), (2), (3), (4)",
+        &ctx,
+    )
+    .await;
+    let (mut table, _, partition) = load_orders_data_file(catalog).await;
+
+    let delete_dir = format!("{table_dir}/data");
+    std::fs::create_dir_all(&delete_dir).unwrap();
+    let dangling = write_position_delete_file(
+        &format!("{delete_dir}/position-delete-dangling.parquet"),
+        &format!("{delete_dir}/rewritten-away.parquet"),
+        partition,
+        &[0, 1, 2],
+    );
+    table
+        .new_transaction(None)
+        .append_delete(vec![dangling])
+        .commit()
+        .await
+        .unwrap();
+
+    let batches = run_query("SELECT count(*) AS n FROM warehouse.test.orders", &ctx).await;
+    assert_batches_eq!(["+---+", "| n |", "+---+", "| 4 |", "+---+",], &batches);
+    let batches = run_query("SELECT id FROM warehouse.test.orders ORDER BY id", &ctx).await;
+    assert_batches_eq!(
+        ["+----+", "| id |", "+----+", "| 1  |", "| 2  |", "| 3  |", "| 4  |", "+----+",],
+        &batches
+    );
+}
+
+/// A format-version 3 table whose deletes are deletion vectors in a Puffin
+/// file. The manifest entry's PUFFIN format must survive the manifest round
+/// trip, and the vector must delete by absolute row position.
+#[tokio::test]
+async fn applies_v3_deletion_vectors() {
+    let temp_dir = TempDir::new().unwrap();
+    let table_dir = format!("{}/test/orders", temp_dir.path().display());
+    let (catalog, ctx) =
+        create_orders_table(&table_dir, id_schema(), None, &[("format-version", "3")]).await;
+
+    run_query(
+        "INSERT INTO warehouse.test.orders VALUES (1), (2), (3), (4), (5), (6)",
+        &ctx,
+    )
+    .await;
+    let (mut table, data_file_path, partition) = load_orders_data_file(catalog).await;
+
+    let delete_dir = format!("{table_dir}/data");
+    std::fs::create_dir_all(&delete_dir).unwrap();
+    let vector = write_deletion_vector_file(
+        &format!("{delete_dir}/deletion-vector.puffin"),
+        &data_file_path,
+        partition,
+        &[1, 4],
+    );
+    table
+        .new_transaction(None)
+        .append_delete(vec![vector])
+        .commit()
+        .await
+        .unwrap();
+
+    let batches = run_query("SELECT id FROM warehouse.test.orders ORDER BY id", &ctx).await;
+    assert_batches_eq!(
+        ["+----+", "| id |", "+----+", "| 1  |", "| 3  |", "| 4  |", "| 6  |", "+----+",],
+        &batches
+    );
+    let batches = run_query("SELECT count(*) AS n FROM warehouse.test.orders", &ctx).await;
+    assert_batches_eq!(["+---+", "| n |", "+---+", "| 4 |", "+---+",], &batches);
 }

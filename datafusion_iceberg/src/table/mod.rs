@@ -113,7 +113,7 @@ use iceberg_rust::{
 use iceberg_rust::{
     spec::{
         arrow::schema::PARQUET_FIELD_ID_META_KEY,
-        manifest::{Content, ManifestEntry, Status},
+        manifest::{Content, FileFormat as DataFileFormat, ManifestEntry, Status},
         util,
         values::{Struct, Value},
     },
@@ -152,19 +152,54 @@ fn unique_internal_column_name(
         .expect("an internal column name must be available")
 }
 
+/// Scans read data files with DataFusion's Parquet reader, so reject any other
+/// format up front: Avro and ORC data files are not supported, and a Puffin
+/// file only ever holds deletion vectors.
+fn check_data_file_format(entry: &ManifestEntry) -> Result<(), DataFusionError> {
+    let data_file = entry.data_file();
+    let error = match data_file.file_format() {
+        DataFileFormat::Parquet => return Ok(()),
+        DataFileFormat::Puffin => Error::InvalidFormat(format!(
+            "data file {} has format Puffin, which holds only deletion vectors",
+            data_file.file_path()
+        )),
+        format => Error::NotSupported(format!(
+            "reading data file {} of format {format:?}",
+            data_file.file_path()
+        )),
+    };
+    Err(DataFusionIcebergError::from(error).into())
+}
+
+/// Whether a position-delete entry is a v3 deletion vector rather than a
+/// position-delete file. As in Apache Iceberg Java, that is decided by its
+/// format: deletion vectors, and only they, live in Puffin files.
+///
+/// # Errors
+/// A Puffin entry that does not locate its blob (`referenced_data_file`,
+/// `content_offset`, `content_size_in_bytes`), or another entry that carries a
+/// blob location.
 fn is_v3_deletion_vector(entry: &ManifestEntry) -> Result<bool, DataFusionError> {
     let data_file = entry.data_file();
     let has_offset = data_file.content_offset().is_some();
     let has_size = data_file.content_size_in_bytes().is_some();
     let has_reference = data_file.referenced_data_file().is_some();
-    match (has_offset, has_size, has_reference) {
-        (false, false, _) => Ok(false),
-        (true, true, true) => Ok(true),
-        _ => Err(DataFusionIcebergError::from(Error::InvalidFormat(format!(
-            "position delete entry {} has inconsistent deletion-vector metadata",
-            data_file.file_path()
+    let is_puffin = *data_file.file_format() == DataFileFormat::Puffin;
+    let consistent = if is_puffin {
+        has_offset && has_size && has_reference
+    } else {
+        // A position-delete file may name the single data file it references.
+        !has_offset && !has_size
+    };
+    if consistent {
+        Ok(is_puffin)
+    } else {
+        Err(DataFusionIcebergError::from(Error::InvalidFormat(format!(
+            "position delete entry {} of format {:?} has inconsistent deletion-vector metadata",
+            data_file.file_path(),
+            data_file.file_format()
         )))
-        .into()),
+        .into())
     }
 }
 
@@ -782,6 +817,7 @@ async fn table_scan(
         {
             match manifest.1.data_file().content() {
                 Content::Data => {
+                    check_data_file_format(&manifest.1)?;
                     active_data_sequence_numbers.insert(
                         util::strip_prefix(manifest.1.data_file().file_path()),
                         *manifest.1.sequence_number(),
@@ -815,6 +851,7 @@ async fn table_scan(
                 let partition = manifest.1.data_file().partition().clone();
                 match manifest.1.data_file().content() {
                     Content::Data => {
+                        check_data_file_format(&manifest.1)?;
                         active_data_sequence_numbers.insert(
                             util::strip_prefix(manifest.1.data_file().file_path()),
                             *manifest.1.sequence_number(),
@@ -1984,52 +2021,99 @@ mod tests {
         catalog::catalog::IcebergCatalog, table::object_store_url_for_location, DataFusionTable,
     };
 
-    #[test]
-    fn rejects_inconsistent_deletion_vector_metadata() {
-        use std::collections::BTreeMap;
-
+    /// A manifest entry with the given content and format, and the given
+    /// deletion-vector fields (referenced data file, blob offset, blob size).
+    fn content_entry(
+        content: iceberg_rust::spec::manifest::Content,
+        format: iceberg_rust::spec::manifest::FileFormat,
+        (referenced, offset, size): (Option<&str>, Option<i64>, Option<i64>),
+    ) -> iceberg_rust::spec::manifest::ManifestEntry {
         use iceberg_rust::spec::{
-            manifest::{Content, DataFile, FileFormat, ManifestEntry, Status},
+            manifest::{DataFile, ManifestEntry, Status},
             table_metadata::FormatVersion,
             values::Struct,
         };
 
-        let make_entry = |content_offset| {
-            let data_file = DataFile::builder()
-                .with_content(Content::PositionDeletes)
-                .with_file_path("/deletes/broken.puffin".to_string())
-                .with_file_format(FileFormat::Parquet)
-                .with_partition(Struct {
-                    fields: Vec::new(),
-                    lookup: BTreeMap::new(),
-                })
-                .with_record_count(1)
-                .with_file_size_in_bytes(1)
-                .with_column_sizes(None)
-                .with_value_counts(None)
-                .with_null_value_counts(None)
-                .with_nan_value_counts(None)
-                .with_distinct_counts(None)
-                .with_lower_bounds(None)
-                .with_upper_bounds(None)
-                .with_referenced_data_file(Some("/data/a.parquet".to_string()))
-                .with_content_offset(content_offset)
-                .build()
-                .unwrap();
-            ManifestEntry::builder()
-                .with_format_version(FormatVersion::V3)
-                .with_status(Status::Added)
-                .with_data_file(data_file)
-                .build()
-                .unwrap()
+        let data_file = DataFile::builder()
+            .with_content(content)
+            .with_file_path("/deletes/file".to_string())
+            .with_file_format(format)
+            .with_partition(Struct {
+                fields: Vec::new(),
+                lookup: Default::default(),
+            })
+            .with_record_count(1)
+            .with_file_size_in_bytes(1)
+            .with_column_sizes(None)
+            .with_value_counts(None)
+            .with_null_value_counts(None)
+            .with_nan_value_counts(None)
+            .with_distinct_counts(None)
+            .with_lower_bounds(None)
+            .with_upper_bounds(None)
+            .with_referenced_data_file(referenced.map(str::to_string))
+            .with_content_offset(offset)
+            .with_content_size_in_bytes(size)
+            .build()
+            .unwrap();
+        ManifestEntry::builder()
+            .with_format_version(FormatVersion::V3)
+            .with_status(Status::Added)
+            .with_data_file(data_file)
+            .build()
+            .unwrap()
+    }
+
+    #[test]
+    fn classifies_position_deletes_by_file_format() {
+        use iceberg_rust::spec::manifest::{Content, FileFormat};
+
+        let classify = |format, fields| {
+            super::is_v3_deletion_vector(&content_entry(Content::PositionDeletes, format, fields))
         };
+        const DATA: Option<&str> = Some("/data/a.parquet");
 
-        assert!(!super::is_v3_deletion_vector(&make_entry(None)).unwrap());
+        // A Puffin entry is a deletion vector and must locate its blob.
+        assert!(classify(FileFormat::Puffin, (DATA, Some(4), Some(40))).unwrap());
+        for fields in [
+            (None, Some(4), Some(40)),
+            (DATA, None, Some(40)),
+            (DATA, Some(4), None),
+        ] {
+            assert!(
+                classify(FileFormat::Puffin, fields).is_err(),
+                "Puffin entry with {fields:?}"
+            );
+        }
 
-        let error = super::is_v3_deletion_vector(&make_entry(Some(0))).unwrap_err();
-        assert!(error
-            .to_string()
-            .contains("inconsistent deletion-vector metadata"));
+        // Any other format is a position-delete file, which may name the one
+        // data file it references but has no blob.
+        assert!(!classify(FileFormat::Parquet, (None, None, None)).unwrap());
+        assert!(!classify(FileFormat::Parquet, (DATA, None, None)).unwrap());
+        for fields in [
+            (DATA, Some(4), Some(40)),
+            (None, Some(4), None),
+            (None, None, Some(40)),
+        ] {
+            assert!(
+                classify(FileFormat::Parquet, fields).is_err(),
+                "Parquet entry with {fields:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn only_parquet_data_files_are_scanned() {
+        use iceberg_rust::spec::manifest::{Content, FileFormat};
+
+        let check = |format| {
+            super::check_data_file_format(&content_entry(Content::Data, format, (None, None, None)))
+        };
+        check(FileFormat::Parquet).unwrap();
+        for format in [FileFormat::Puffin, FileFormat::Avro, FileFormat::Orc] {
+            let error = check(format.clone()).unwrap_err().to_string();
+            assert!(error.contains("/deletes/file"), "{format:?}: {error}");
+        }
     }
 
     /// End-to-end at the physical-plan level: a real `ParquetSource` scan
